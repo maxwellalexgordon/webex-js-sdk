@@ -195,6 +195,38 @@ describe('plugin-meetings', () => {
         );
       });
 
+      it('passes an isLlmExpected callback that is true when current device is joined', async () => {
+        locusInfo.parsedLocus.self = {
+          state: 'LEFT',
+          joinedWith: {state: 'JOINED'},
+        };
+
+        await locusInfo.initialSetup({
+          trigger: 'locus-message',
+          hashTreeMessage: createHashTreeMessage(['dataset1']),
+        });
+
+        const {isLlmExpected} = HashTreeParserStub.firstCall.args[0].callbacks;
+
+        assert.equal(isLlmExpected(), true);
+      });
+
+      it('passes an isLlmExpected callback that is false when self is joined but current device is not joined', async () => {
+        locusInfo.parsedLocus.self = {
+          state: 'JOINED',
+          joinedWith: {state: 'LEFT'},
+        };
+
+        await locusInfo.initialSetup({
+          trigger: 'locus-message',
+          hashTreeMessage: createHashTreeMessage(['dataset1']),
+        });
+
+        const {isLlmExpected} = HashTreeParserStub.firstCall.args[0].callbacks;
+
+        assert.equal(isLlmExpected(), false);
+      });
+
       it('should not initialize the hash tree when triggered from a non-hash tree locus message', async () => {
         const locus = {url: 'http://locus-url.com', participants: []};
 
@@ -2023,6 +2055,53 @@ describe('plugin-meetings', () => {
     });
 
     describe('#updateSelf', () => {
+      describe('LLM watchdog re-evaluation', () => {
+        it('re-evaluates LLM watchdogs on all hash tree parsers when self transitions to joined', () => {
+          const parserA = {reevaluateLlmWatchdogs: sinon.stub()};
+          const parserB = {reevaluateLlmWatchdogs: sinon.stub()};
+          locusInfo.hashTreeParsers.set('urlA', {parser: parserA});
+          locusInfo.hashTreeParsers.set('urlB', {parser: parserB});
+
+          // start with LLM not expected (no self yet)
+          locusInfo.parsedLocus.self = undefined;
+          locusInfo.webex.internal.device.url = self.deviceUrl;
+
+          // the self fixture's joined device has state JOINED -> isLlmExpected becomes true
+          locusInfo.updateSelf(cloneDeep(self));
+
+          assert.calledOnceWithExactly(parserA.reevaluateLlmWatchdogs);
+          assert.calledOnceWithExactly(parserB.reevaluateLlmWatchdogs);
+        });
+
+        it('does not re-evaluate LLM watchdogs when LLM was already expected before the update', () => {
+          const parser = {reevaluateLlmWatchdogs: sinon.stub()};
+          locusInfo.hashTreeParsers.set('urlA', {parser});
+          locusInfo.webex.internal.device.url = self.deviceUrl;
+
+          // first update establishes the JOINED state (LLM already expected)
+          locusInfo.updateSelf(cloneDeep(self));
+          parser.reevaluateLlmWatchdogs.resetHistory();
+
+          // second update while already joined must not re-trigger re-evaluation
+          locusInfo.updateSelf(cloneDeep(self));
+
+          assert.notCalled(parser.reevaluateLlmWatchdogs);
+        });
+
+        it('does not re-evaluate LLM watchdogs when the self update does not make LLM expected', () => {
+          const parser = {reevaluateLlmWatchdogs: sinon.stub()};
+          locusInfo.hashTreeParsers.set('urlA', {parser});
+
+          locusInfo.parsedLocus.self = undefined;
+          // device url does not match any of self's devices -> joinedWith is undefined -> not expected
+          locusInfo.webex.internal.device.url = 'https://some-other-device-url.com';
+
+          locusInfo.updateSelf(cloneDeep(self));
+
+          assert.notCalled(parser.reevaluateLlmWatchdogs);
+        });
+      });
+
       it('should trigger SELF_MEETING_BRB_CHANGED when brb state changed', () => {
         locusInfo.self = undefined;
 
@@ -2448,6 +2527,7 @@ describe('plugin-meetings', () => {
 
         selfWithLocalUnmuteRequired.controls.audio.muted = false;
         selfWithLocalUnmuteRequired.controls.audio.localAudioUnmuteRequired = true;
+        selfWithLocalUnmuteRequired.controls.audio.meta = {modifiedBy: 'host-uuid-123'};
 
         locusInfo.emitScoped = sinon.stub();
         locusInfo.updateSelf(selfWithLocalUnmuteRequired);
@@ -2462,6 +2542,33 @@ describe('plugin-meetings', () => {
           {
             muted: false,
             unmuteAllowed: true,
+            modifiedBy: 'host-uuid-123',
+          }
+        );
+      });
+
+      it('should set modifiedBy to null on LOCAL_UNMUTE_REQUIRED when it is unavailable', () => {
+        locusInfo.webex.internal.device.url = self.deviceUrl;
+        locusInfo.updateSelf(self);
+        const selfWithLocalUnmuteRequired = cloneDeep(self);
+
+        selfWithLocalUnmuteRequired.controls.audio.muted = false;
+        selfWithLocalUnmuteRequired.controls.audio.localAudioUnmuteRequired = true;
+
+        locusInfo.emitScoped = sinon.stub();
+        locusInfo.updateSelf(selfWithLocalUnmuteRequired);
+
+        assert.calledWith(
+          locusInfo.emitScoped,
+          {
+            file: 'locus-info',
+            function: 'updateSelf',
+          },
+          LOCUSINFO.EVENTS.LOCAL_UNMUTE_REQUIRED,
+          {
+            muted: false,
+            unmuteAllowed: true,
+            modifiedBy: null,
           }
         );
       });
