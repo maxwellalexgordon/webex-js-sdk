@@ -100,7 +100,12 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
   // @ts-ignore
   private preLoginMetricsBatcher: PreLoginMetricsBatcher;
 
-  private logger: any; // to avoid adding @ts-ignore everywhere
+  // lazy getter to avoid @ts-ignore on every call site
+  private get logger(): any {
+    // @ts-ignore
+    return this.webex.logger;
+  }
+
   private hasLoggedBrowserSerial: boolean;
   private device: any;
   private delayedClientEvents: DelayedClientEvent[] = [];
@@ -126,8 +131,6 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
    */
   constructor(...args) {
     super(...args);
-    // @ts-ignore
-    this.logger = this.webex.logger;
     // @ts-ignore
     this.callDiagnosticEventsBatcher = new CallDiagnosticEventsBatcher({}, {parent: this.webex});
     // @ts-ignore
@@ -273,12 +276,12 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
   getOrigin(options: GetOriginOptions, meetingId?: string) {
     const defaultClientType: ClientType =
       // @ts-ignore
-      this.webex.meetings.config?.metrics?.clientType;
+      this.webex.meetings?.config?.metrics?.clientType;
     const defaultSubClientType: SubClientType =
       // @ts-ignore
-      this.webex.meetings.config?.metrics?.subClientType;
+      this.webex.meetings?.config?.metrics?.subClientType;
     // @ts-ignore
-    const providedClientVersion: string = this.webex.meetings.config?.metrics?.clientVersion;
+    const providedClientVersion: string = this.webex.meetings?.config?.metrics?.clientVersion;
     // @ts-ignore
     const defaultSDKClientVersion = `${CLIENT_NAME}/${this.webex.version}`;
 
@@ -299,7 +302,7 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
       isSupportedBrowserFamily,
       isOutdatedBrowserVersion,
       // @ts-ignore
-    } = this.webex.meetings.config?.metrics ?? {};
+    } = this.webex.meetings?.config?.metrics ?? {};
 
     if (!this.hasLoggedBrowserSerial) {
       this.logger.log(
@@ -330,12 +333,12 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
           ...versionMetadata,
           publicNetworkPrefix:
             // @ts-ignore
-            anonymizeIPAddress(this.webex.meetings.geoHintInfo?.clientAddress) || undefined,
+            anonymizeIPAddress(this.webex.meetings?.geoHintInfo?.clientAddress) || undefined,
           localNetworkPrefix:
             anonymizeIPAddress(
               // @ts-ignore
-              this.webex.meetings.meetingCollection
-                .get(meetingId)
+              this.webex.meetings?.meetingCollection
+                ?.get(meetingId)
                 ?.statsAnalyzer?.getLocalIpAddress()
             ) || undefined,
           osVersion: getOSVersion() || 'unknown',
@@ -350,7 +353,7 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
 
       if (meetingId) {
         // @ts-ignore
-        const meeting = this.webex.meetings.getBasicMeetingInformation(meetingId);
+        const meeting = this.webex.meetings?.getBasicMeetingInformation(meetingId);
         if (meeting?.environment) {
           origin.environment = meeting.environment;
         }
@@ -380,6 +383,20 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
     }
 
     throw new Error("ClientType and SubClientType can't be undefined");
+  }
+
+  /**
+   * Returns the signed-in user's CI ID derived from credentials tokens.
+   * Used as a fallback when no device is registered.
+   * @returns the userId, or undefined if it can't be determined
+   */
+  private getUserIdFromCredentials(): string | undefined {
+    try {
+      // @ts-ignore
+      return this.webex.credentials.getUserId();
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -426,7 +443,6 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
       const {device} = this;
       const {installationId} = device?.config || {};
 
-      identifiers.userId = device?.userId || preLoginId;
       identifiers.deviceId = device?.url;
       identifiers.orgId = device?.orgId;
       // @ts-ignore
@@ -436,6 +452,10 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
         identifiers.machineId = installationId;
       }
     }
+
+    // Prefer the device's userId, but fall back to the signed-in user's ID from
+    // credentials when no device is registered, then to the pre-login ID.
+    identifiers.userId = this.device?.userId || this.getUserIdFromCredentials() || preLoginId;
 
     if (meeting?.locusInfo?.fullState) {
       identifiers.locusUrl = meeting.locusUrl;
@@ -500,7 +520,7 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
         sent: 'not_defined_yet',
       },
       // @ts-ignore
-      senderCountryCode: this.webex.meetings.geoHintInfo?.countryCode,
+      senderCountryCode: this.webex.meetings?.geoHintInfo?.countryCode,
       event: eventData,
     };
 
@@ -1465,7 +1485,7 @@ export default class CallDiagnosticMetrics extends StatelessWebexPlugin {
       },
       headers: {},
       // @ts-ignore
-      waitForServiceTimeout: this.webex.internal.metrics.config.waitForServiceTimeout,
+      waitForServiceTimeout: this.webex.internal.metrics?.config?.waitForServiceTimeout,
     };
 
     if (options.preLoginId) {

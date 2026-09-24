@@ -3045,7 +3045,7 @@ export class Call extends Eventing<CallEventTypes> implements ICall {
     if (this.localAudioStream) {
       const effect = this.localAudioStream.getEffectByKind(NOISE_REDUCTION_EFFECT);
 
-      if (effect === addedEffect) {
+      if (effect && effect === addedEffect) {
         effect.on(EffectEvent.Enabled, this.onEffectEnabled);
         effect.on(EffectEvent.Disabled, this.onEffectDisabled);
       }
@@ -3099,7 +3099,9 @@ export class Call extends Eventing<CallEventTypes> implements ICall {
           deviceId: this.deviceId,
           correlationId: this.correlationId,
         },
-        callId: this.callId,
+        callId: this.callId.includes(DEFAULT_LOCAL_CALL_ID)
+          ? this.callId.replace(`${DEFAULT_LOCAL_CALL_ID}_`, '')
+          : this.callId,
         metrics: disconnectMetrics,
         causecode: this.disconnectReason.code,
         cause: this.disconnectReason.cause,

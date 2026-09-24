@@ -7,6 +7,7 @@ import {ERROR_TYPE, ERROR_LAYER} from '../../Errors/types';
 import * as Utils from '../../common/Utils';
 import {CALL_EVENT_KEYS, CallEvent, RoapEvent, RoapMessage} from '../../Events/types';
 import {
+  DEFAULT_LOCAL_CALL_ID,
   DEFAULT_SESSION_TIMER,
   ICE_CANDIDATES_TIMEOUT,
   ICE_LITE_CANDIDATES_TIMEOUT,
@@ -274,6 +275,11 @@ describe('Call Tests', () => {
     await waitForMsecs(50); // Need to add a small delay for Promise and callback to finish.
     expect(parseMediaQualityStatisticsMock).toHaveBeenCalledTimes(1);
     expect(webex.request.mock.calls[0][0].body.metrics).toStrictEqual(disconnectStats);
+    expect(webex.request.mock.calls[0][0].body.callId).toBe(
+      call.getCallId().replace(`${DEFAULT_LOCAL_CALL_ID}_`, '')
+    );
+    expect(webex.request.mock.calls[0][0].body.callId).not.toContain(DEFAULT_LOCAL_CALL_ID);
+    expect(webex.request.mock.calls[0][0].body.callId).not.toMatch(/^_/);
     expect(call.getDisconnectReason().code).toBe(DisconnectCode.NORMAL);
     expect(call.getDisconnectReason().cause).toBe(DisconnectCause.NORMAL);
 
@@ -309,6 +315,29 @@ describe('Call Tests', () => {
     const response = await call['postMedia']({});
 
     expect(response.body).toStrictEqual(mediaResponse.body);
+  });
+
+  it('delete sends the server-assigned callId unchanged', async () => {
+    const serverCallId = '8a67806f-fc4d-446b-a131-31e71ea5b020';
+
+    webex.request.mockReturnValue({
+      statusCode: 200,
+      body: {
+        device: {
+          deviceId: '8a67806f-fc4d-446b-a131-31e71ea5b010',
+          correlationId: '8a67806f-fc4d-446b-a131-31e71ea5b011',
+        },
+        callId: serverCallId,
+      },
+    });
+
+    const call = callManager.createCall(CallDirection.OUTBOUND, deviceId, mockLineId, dest);
+
+    call.setCallId(serverCallId);
+    call.end();
+    await waitForMsecs(50);
+
+    expect(webex.request.mock.calls[0][0].body.callId).toBe(serverCallId);
   });
 
   it('check whether callerId midcall event is serviced or not', async () => {
@@ -1009,6 +1038,35 @@ describe('Call Tests', () => {
     );
     expect(offEffectSpy).toBeCalledWith(EffectEvent.Enabled, expect.any(Function));
     expect(offEffectSpy).toBeCalledWith(EffectEvent.Disabled, expect.any(Function));
+  });
+
+  it('does not register effect listeners when the added effect cannot be resolved', () => {
+    const mockStream = {
+      outputStream: {
+        getAudioTracks: jest.fn().mockReturnValue([mockTrack]),
+      },
+      on: jest.fn(),
+      getEffectByKind: jest.fn().mockReturnValue(undefined),
+    };
+
+    const localAudioStream = mockStream as unknown as InternalMediaCoreModule.LocalMicrophoneStream;
+    const onStreamSpy = jest.spyOn(localAudioStream, 'on');
+    const onEffectSpy = jest.spyOn(mockEffect, 'on');
+    const call = createCall(
+      activeUrl,
+      webex,
+      CallDirection.OUTBOUND,
+      deviceId,
+      mockLineId,
+      deleteCallFromCollection,
+      defaultServiceIndicator,
+      dest
+    );
+
+    call.dial(localAudioStream);
+
+    expect(() => onStreamSpy.mock.calls[1][1](undefined as any)).not.toThrow();
+    expect(onEffectSpy).not.toHaveBeenCalled();
   });
 
   it('answer fails if localAudioTrack is empty', async () => {

@@ -364,6 +364,23 @@ describe('internal-plugin-metrics', () => {
         });
       });
 
+      it('should build origin correctly when the meetings plugin is not available (before webex is ready)', () => {
+        // meetings plugin, geoHintInfo and meetingCollection are all absent before webex.ready
+        webex.meetings = undefined;
+
+        //@ts-ignore
+        const res = cd.getOrigin(
+          {subClientType: 'WEB_APP', clientType: 'TEAMS_CLIENT'},
+          fakeMeeting.id
+        );
+
+        assert.equal(res.clientInfo.clientType, 'TEAMS_CLIENT');
+        assert.equal(res.clientInfo.subClientType, 'WEB_APP');
+        assert.isUndefined(res.clientInfo.publicNetworkPrefix);
+        assert.isUndefined(res.clientInfo.localNetworkPrefix);
+        assert.equal(res.name, 'endpoint');
+      });
+
       it('builds origin correctly, when overriding clientVersion', () => {
         webex.meetings.config.metrics.clientVersion = '43.9.0.1234';
 
@@ -823,6 +840,60 @@ describe('internal-plugin-metrics', () => {
           orgId: 'orgId',
           userId: 'preLoginId',
         });
+      });
+
+      it('should use the userId from credentials when no device userId is available', () => {
+        cd.device.userId = undefined;
+        webex.credentials.getUserId = sinon.stub().returns('credentials-user-id');
+
+        const res = cd.getIdentifiers({
+          correlationId: 'correlationId',
+        });
+
+        assert.deepEqual(res, {
+          correlationId: 'correlationId',
+          locusUrl: 'locus-url',
+          deviceId: 'deviceUrl',
+          orgId: 'orgId',
+          userId: 'credentials-user-id',
+        });
+      });
+
+      it('should prefer the device userId over the credentials userId', () => {
+        webex.credentials.getUserId = sinon.stub().returns('credentials-user-id');
+
+        const res = cd.getIdentifiers({
+          correlationId: 'correlationId',
+        });
+
+        assert.equal(res.userId, 'userId');
+        assert.notCalled(webex.credentials.getUserId);
+      });
+
+      it('should fall back to preLoginId when neither the device nor credentials provide a userId', () => {
+        cd.device.userId = undefined;
+        webex.credentials.getUserId = sinon.stub().throws(new Error('no user token available'));
+
+        const res = cd.getIdentifiers({
+          correlationId: 'correlationId',
+          preLoginId: 'preLoginId',
+        });
+
+        assert.equal(res.userId, 'preLoginId');
+      });
+    });
+
+    describe('#getUserIdFromCredentials', () => {
+      it('should return the userId from credentials', () => {
+        webex.credentials.getUserId = sinon.stub().returns('credentials-user-id');
+
+        assert.equal(cd.getUserIdFromCredentials(), 'credentials-user-id');
+      });
+
+      it('should return undefined when credentials cannot provide a userId', () => {
+        webex.credentials.getUserId = sinon.stub().throws(new Error('no user token available'));
+
+        assert.isUndefined(cd.getUserIdFromCredentials());
       });
     });
 
@@ -4526,6 +4597,30 @@ describe('internal-plugin-metrics', () => {
           fetchOptions.body.metrics[0].eventPayload.event.meetingJoinPhase,
           options.meetingJoinPhase
         );
+      });
+
+      it('builds request options before webex is ready (no meetings plugin or internal metrics config)', async () => {
+        // before webex.ready the meetings plugin and internal metrics config are not available
+        webex.meetings = undefined;
+        webex.internal.metrics = undefined;
+
+        const options = {
+          correlationId: 'myCorrelationId',
+          clientType: 'TEAMS_CLIENT',
+          subClientType: 'WEB_APP',
+        };
+
+        const fetchOptions = await cd.buildClientEventFetchRequestOptions({
+          name: 'client.exit.app',
+          payload: {trigger: 'user-interaction', canProceed: false},
+          options,
+        });
+
+        const eventPayload = fetchOptions.body.metrics[0].eventPayload;
+        assert.equal(eventPayload.event.name, 'client.exit.app');
+        assert.isUndefined(eventPayload.senderCountryCode);
+        assert.isUndefined(fetchOptions.waitForServiceTimeout);
+        assert.equal(fetchOptions.resource, 'clientmetrics');
       });
     });
 
